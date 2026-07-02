@@ -1,71 +1,283 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Megaphone, CheckCircle, XCircle, MessageSquare, ChevronDown, ChevronRight, Loader2, Rocket } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Megaphone,
+  CheckCircle,
+  XCircle,
+  MessageSquare,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Calendar,
+  Clock,
+  Eye,
+  AlertCircle,
+  RefreshCw,
+  FileText,
+} from 'lucide-react';
 
-const PILLAR_EMOJI = { product: '🛒', case: '🏠', promo: '🎉', story: '📖' };
+/* ── Pillar configuration ── */
+
+const PILLAR_EMOJI = {
+  product: '🛒',
+  case: '🏠',
+  promo: '🎉',
+  story: '📖',
+  educational: '📚',
+};
+
+const PILLAR_STYLES = {
+  product: { bg: '#e3f1d8', text: '#2e7d32' },
+  case: { bg: '#e7f3ff', text: '#1877f2' },
+  promo: { bg: '#fff4d6', text: '#b26b00' },
+  story: { bg: '#f0e7ff', text: '#7b3ff2' },
+  educational: { bg: '#d4f4f0', text: '#0d7a6e' },
+};
+
+/* ── Status configuration ── */
+
+const STATUS_CONFIG = {
+  copy_done: { label: 'Pending Review', bg: '#fff4d6', text: '#b26b00', dot: '#b26b00' },
+  copy_approved: { label: 'Approved', bg: '#e8f5e9', text: '#2e7d32', dot: '#2e7d32' },
+  image_ready: { label: 'Image Ready', bg: '#e7f3ff', text: '#1877f2', dot: '#1877f2' },
+  image_retry: { label: 'Image Retry', bg: '#fde2e1', text: '#d32f2f', dot: '#d32f2f' },
+  approved: { label: 'Ready to Publish', bg: '#e3f1d8', text: '#1b5e20', dot: '#1b5e20' },
+};
+
+/* ── Sub-components ── */
 
 function PillarBadge({ pillar }) {
   const emoji = PILLAR_EMOJI[pillar] || '📝';
+  const style = PILLAR_STYLES[pillar] || { bg: '#f2f3f5', text: '#65676b' };
   return (
     <span
       className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold"
-      style={{
-        backgroundColor: pillar === 'promo' ? '#fff4d6' : pillar === 'case' ? '#e7f3ff' : pillar === 'story' ? '#f0e7ff' : '#e3f1d8',
-        color: pillar === 'promo' ? '#b26b00' : pillar === 'case' ? '#1877f2' : pillar === 'story' ? '#7b3ff2' : '#2e7d32',
-      }}
+      style={{ backgroundColor: style.bg, color: style.text }}
     >
       {emoji} {pillar}
     </span>
   );
 }
 
-export default function MarketingPendingPage() {
-  // Pending review state
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState('');
-  const [expandedFb, setExpandedFb] = useState({});
-  const [expandedIg, setExpandedIg] = useState({});
-  const [rejecting, setRejecting] = useState({});
-  const [rejectNotes, setRejectNotes] = useState({});
+function StatusBadge({ status }) {
+  const cfg = STATUS_CONFIG[status] || { label: status, bg: '#f2f3f5', text: '#65676b' };
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+      style={{ backgroundColor: cfg.bg, color: cfg.text }}
+    >
+      <span
+        className="w-1.5 h-1.5 rounded-full"
+        style={{ backgroundColor: cfg.dot }}
+      />
+      {cfg.label}
+    </span>
+  );
+}
+
+/* ── Helpers ── */
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
+
+function formatDateShort(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function isToday(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  const t = new Date();
+  return (
+    d.getFullYear() === t.getFullYear() &&
+    d.getMonth() === t.getMonth() &&
+    d.getDate() === t.getDate()
+  );
+}
+
+/* ── Loading Skeleton ── */
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-3">
+      {[1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="rounded-lg p-5 animate-pulse"
+          style={{ backgroundColor: '#ffffff', border: '1px solid #dadde1' }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="h-4 w-32 rounded" style={{ backgroundColor: '#e4e6eb' }} />
+            <div className="h-4 w-20 rounded" style={{ backgroundColor: '#e4e6eb' }} />
+          </div>
+          <div className="h-3 w-full rounded mb-2" style={{ backgroundColor: '#f0f2f5' }} />
+          <div className="h-3 w-3/4 rounded" style={{ backgroundColor: '#f0f2f5' }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Error State ── */
+
+function ErrorState({ message, onRetry }) {
+  return (
+    <div
+      className="rounded-lg p-6 flex flex-col items-center text-center"
+      style={{ backgroundColor: '#fde2e1', border: '1px solid #f5b1ae' }}
+    >
+      <AlertCircle size={28} style={{ color: '#c62828' }} />
+      <p className="text-[13px] font-semibold mt-2" style={{ color: '#a01818' }}>
+        Failed to load data
+      </p>
+      <p className="text-[12px] mt-1 mb-3" style={{ color: '#a01818' }}>
+        {message}
+      </p>
+      <button
+        onClick={onRetry}
+        className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors"
+        style={{ backgroundColor: '#c62828', color: '#ffffff' }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#a01818'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#c62828'; }}
+      >
+        <RefreshCw size={14} />
+        Retry
+      </button>
+    </div>
+  );
+}
+
+/* ── Empty State ── */
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center text-center py-12">
+      <div
+        className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
+        style={{ backgroundColor: '#e7f3ff' }}
+      >
+        <Calendar size={22} strokeWidth={1.75} style={{ color: '#1877f2' }} />
+      </div>
+      <p className="text-[14px]" style={{ color: '#65676b' }}>
+        No posts found for this plan
+      </p>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════
+   MAIN PAGE COMPONENT
+   ════════════════════════════════════════════ */
+
+export default function MarketingReviewPage() {
+  /* ── Plan state ── */
+  const [plans, setPlans] = useState([]);
+  const [selectedPlanId, setSelectedPlanId] = useState(null);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState('');
+
+  /* ── Posts state ── */
+  const [posts, setPosts] = useState([]);
+  const [planInfo, setPlanInfo] = useState(null);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [postsError, setPostsError] = useState('');
+
+  /* ── UI state ── */
+  const [expandedCard, setExpandedCard] = useState({});
   const [actionLoading, setActionLoading] = useState({});
   const [actionError, setActionError] = useState({});
+  const [rejecting, setRejecting] = useState({});
+  const [rejectNotes, setRejectNotes] = useState({});
 
-  // Approved / publish state
-  const [approvedItems, setApprovedItems] = useState([]);
-  const [approvedLoading, setApprovedLoading] = useState(true);
-  const [approvedError, setApprovedError] = useState('');
-  const [expandedFbApproved, setExpandedFbApproved] = useState({});
-  const [expandedIgApproved, setExpandedIgApproved] = useState({});
-  const [publishingId, setPublishingId] = useState(null);
-  const [publishError, setPublishError] = useState({});
-  const [publishSuccess, setPublishSuccess] = useState({});
+  /* ── Summary computed from posts ── */
+  const summary = useMemo(() => {
+    const total = posts.length;
+    const pending = posts.filter((p) => p.status === 'copy_done').length;
+    const approved = posts.filter((p) => p.status === 'copy_approved').length;
+    const withImagery = posts.filter(
+      (p) => p.image_url || p.image_status === 'ready'
+    ).length;
+    return { total, pending, approved, withImagery };
+  }, [posts]);
 
-  useEffect(() => {
-    fetchItems();
-    fetchApprovedItems();
-  }, []);
-
-  // --- Pending Review ---
-
-  const fetchItems = async () => {
-    setLoading(true);
-    setFetchError('');
+  /* ── Fetch plans on mount ── */
+  const fetchPlans = useCallback(async () => {
+    setPlansLoading(true);
+    setPlansError('');
     try {
-      const res = await fetch('/api/marketing/pending');
+      const res = await fetch('/api/marketing/plans');
       const data = await res.json();
       if (data.error) {
-        setFetchError(data.error);
+        setPlansError(data.error);
       } else {
-        setItems(Array.isArray(data) ? data : []);
+        const planList = Array.isArray(data) ? data : [];
+        setPlans(planList);
+
+        // Auto-select most recent plan with pending items
+        const withPending = planList.filter((p) => (p.counts?.pending || 0) > 0);
+        if (withPending.length > 0) {
+          setSelectedPlanId(withPending[0].id);
+        } else if (planList.length > 0) {
+          setSelectedPlanId(planList[0].id);
+        }
       }
     } catch {
-      setFetchError('Failed to load pending reviews.');
+      setPlansError('Failed to load plans.');
     }
-    setLoading(false);
+    setPlansLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchPlans();
+  }, [fetchPlans]);
+
+  /* ── Fetch posts when plan changes ── */
+  const fetchPosts = useCallback(async (planId) => {
+    if (!planId) return;
+    setPostsLoading(true);
+    setPostsError('');
+    try {
+      const res = await fetch(`/api/marketing/plan/${planId}`);
+      const data = await res.json();
+      if (data.error) {
+        setPostsError(data.error);
+      } else {
+        setPlanInfo(data.plan || null);
+        setPosts(Array.isArray(data.posts) ? data.posts : []);
+      }
+    } catch {
+      setPostsError('Failed to load posts.');
+    }
+    setPostsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchPosts(selectedPlanId);
+  }, [selectedPlanId, fetchPosts]);
+
+  /* ── Handle plan selection ── */
+  const handlePlanChange = (e) => {
+    const newId = e.target.value;
+    setSelectedPlanId(newId);
+    setExpandedCard({});
+    setRejecting({});
+    setRejectNotes({});
+    setActionError({});
+    setActionLoading({});
   };
 
+  /* ── Toggle expand card ── */
+  const toggleExpand = (id) => {
+    setExpandedCard((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  /* ── Approve action ── */
   const handleApprove = useCallback(async (id) => {
     setActionLoading((prev) => ({ ...prev, [id]: true }));
     setActionError((prev) => ({ ...prev, [id]: '' }));
@@ -77,19 +289,17 @@ export default function MarketingPendingPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 409) {
-          const statusLabel = data.currentStatus === 'approved' ? 'approved' : 'rejected';
-          setActionError((prev) => ({
-            ...prev,
-            [id]: `This post was already ${statusLabel} by another user.`,
-          }));
-        } else {
-          setActionError((prev) => ({ ...prev, [id]: data.error || 'An error occurred.' }));
-        }
+        setActionError((prev) => ({
+          ...prev,
+          [id]: data.error || 'An error occurred.',
+        }));
       } else {
-        setItems((prev) => prev.filter((item) => item.id !== id));
-        // Refresh approved items since a new one might be available
-        fetchApprovedItems();
+        // Update local state — don't refetch
+        setPosts((prev) =>
+          prev.map((p) =>
+            p.id === id ? { ...p, status: 'copy_approved' } : p
+          )
+        );
       }
     } catch {
       setActionError((prev) => ({ ...prev, [id]: 'Failed to connect to server.' }));
@@ -97,6 +307,7 @@ export default function MarketingPendingPage() {
     setActionLoading((prev) => ({ ...prev, [id]: false }));
   }, []);
 
+  /* ── Request Changes / Reject ── */
   const handleReject = useCallback(async (id) => {
     const notes = rejectNotes[id] || '';
     setActionLoading((prev) => ({ ...prev, [id]: true }));
@@ -109,19 +320,15 @@ export default function MarketingPendingPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 409) {
-          const statusLabel = data.currentStatus === 'approved' ? 'approved' : 'rejected';
-          setActionError((prev) => ({
-            ...prev,
-            [id]: `This post was already ${statusLabel} by another user.`,
-          }));
-        } else {
-          setActionError((prev) => ({ ...prev, [id]: data.error || 'An error occurred.' }));
-        }
+        setActionError((prev) => ({
+          ...prev,
+          [id]: data.error || 'An error occurred.',
+        }));
       } else {
-        setItems((prev) => prev.filter((item) => item.id !== id));
+        // Post stays in copy_done but with review_notes saved
         setRejecting((prev) => ({ ...prev, [id]: false }));
         setRejectNotes((prev) => ({ ...prev, [id]: '' }));
+        setActionError((prev) => ({ ...prev, [id]: '' }));
       }
     } catch {
       setActionError((prev) => ({ ...prev, [id]: 'Failed to connect to server.' }));
@@ -129,536 +336,565 @@ export default function MarketingPendingPage() {
     setActionLoading((prev) => ({ ...prev, [id]: false }));
   }, [rejectNotes]);
 
-  // --- Approved / Publish ---
-
-  const fetchApprovedItems = async () => {
-    setApprovedLoading(true);
-    setApprovedError('');
-    try {
-      const res = await fetch('/api/marketing/approved');
-      const data = await res.json();
-      if (data.error) {
-        setApprovedError(data.error);
-      } else {
-        setApprovedItems(Array.isArray(data) ? data : []);
-      }
-    } catch {
-      setApprovedError('Failed to load approved items.');
-    }
-    setApprovedLoading(false);
+  /* ── Get selected plan display text ── */
+  const getPlanLabel = (plan) => {
+    const counts = plan.counts || {};
+    const total = plan.total_posts || counts.total || 0;
+    const pending = counts.pending || 0;
+    const approved = counts.approved || 0;
+    return `${plan.month} — ${total} posts (${pending} pending, ${approved} approved)`;
   };
 
-  const handlePublish = useCallback(async (id) => {
-    setPublishingId(id);
-    setPublishError((prev) => ({ ...prev, [id]: '' }));
-    setPublishSuccess((prev) => ({ ...prev, [id]: '' }));
-    try {
-      const res = await fetch('/api/marketing/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (res.status === 409) {
-          if (data.post_id) {
-            setPublishSuccess((prev) => ({
-              ...prev,
-              [id]: `Already published: ${data.post_id}`,
-            }));
-          } else {
-            setPublishError((prev) => ({
-              ...prev,
-              [id]: data.error || 'Conflict — item was already modified.',
-            }));
-          }
-        } else {
-          setPublishError((prev) => ({ ...prev, [id]: data.error || 'An error occurred.' }));
-        }
-      } else {
-        setPublishSuccess((prev) => ({
-          ...prev,
-          [id]: data.dry_run
-            ? `Published (dry-run: ${data.post_id})`
-            : `Published: ${data.post_id}`,
-        }));
-        // Remove from approved list
-        setApprovedItems((prev) => prev.filter((item) => item.id !== id));
-      }
-    } catch {
-      setPublishError((prev) => ({ ...prev, [id]: 'Failed to connect to server.' }));
-    }
-    setPublishingId(null);
-  }, []);
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
+  /* ── Render ── */
 
   return (
     <div>
+      {/* ──────── HEADER ──────── */}
       <div className="mb-6">
         <h1 className="text-[24px] font-semibold tracking-tight" style={{ color: '#1c1e21' }}>
-          Marketing Content
+          Content Review
         </h1>
         <p className="text-[14px] mt-1.5" style={{ color: '#65676b' }}>
-          Review, approve, and publish social media content
+          Review and approve monthly marketing content
         </p>
       </div>
 
-      {/* ======================== */}
-      {/* SECTION 1: Pending Review */}
-      {/* ======================== */}
-      <div className="mb-8">
-        <h2 className="text-[18px] font-semibold mb-3" style={{ color: '#1c1e21' }}>
-          Pending Review
-        </h2>
+      {/* ──────── PLAN SELECTOR ──────── */}
+      <div
+        className="rounded-lg p-4 mb-5"
+        style={{ backgroundColor: '#ffffff', border: '1px solid #dadde1' }}
+      >
+        <label
+          className="block text-[13px] font-semibold mb-2"
+          style={{ color: '#1c1e21' }}
+        >
+          <Calendar size={14} className="inline mr-1.5" style={{ color: '#65676b' }} />
+          Content Plan
+        </label>
 
-        {/* Loading state */}
-        {loading && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 size={28} className="animate-spin" style={{ color: '#1877f2' }} />
+        {plansLoading ? (
+          <div className="flex items-center gap-2 py-2">
+            <Loader2 size={16} className="animate-spin" style={{ color: '#1877f2' }} />
+            <span className="text-[13px]" style={{ color: '#65676b' }}>
+              Loading plans...
+            </span>
           </div>
-        )}
-
-        {/* Fetch error */}
-        {!loading && fetchError && (
-          <div
-            className="rounded-lg p-4 mb-5 flex items-start gap-3"
-            style={{ backgroundColor: '#fde2e1', border: '1px solid #f5b1ae' }}
-          >
-            <XCircle size={18} style={{ color: '#c62828', flexShrink: 0, marginTop: 2 }} />
-            <div>
-              <p className="text-[13px] font-semibold" style={{ color: '#a01818' }}>Error</p>
-              <p className="text-[13px] mt-0.5" style={{ color: '#a01818' }}>{fetchError}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Empty state */}
-        {!loading && !fetchError && items.length === 0 && (
-          <div className="flex flex-col items-center text-center py-12">
-            <div
-              className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
-              style={{ backgroundColor: '#e7f3ff' }}
+        ) : plansError ? (
+          <div className="flex items-center gap-2 py-1">
+            <span className="text-[13px]" style={{ color: '#c62828' }}>
+              {plansError}
+            </span>
+            <button
+              onClick={fetchPlans}
+              className="text-[13px] font-semibold underline"
+              style={{ color: '#1877f2' }}
             >
-              <Megaphone size={22} strokeWidth={1.75} style={{ color: '#1877f2' }} />
-            </div>
-            <p className="text-[14px]" style={{ color: '#65676b' }}>
-              No pending reviews
-            </p>
+              Retry
+            </button>
           </div>
+        ) : (
+          <select
+            value={selectedPlanId || ''}
+            onChange={handlePlanChange}
+            className="w-full px-3 py-2 rounded-md text-[14px] outline-none transition-shadow"
+            style={{
+              border: '1px solid #dadde1',
+              backgroundColor: '#ffffff',
+              color: '#1c1e21',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.border = '1px solid #1877f2';
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(24,119,242,0.15)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.border = '1px solid #dadde1';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            {plans.length === 0 && (
+              <option value="">No plans available</option>
+            )}
+            {plans.map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {getPlanLabel(plan)}
+              </option>
+            ))}
+          </select>
         )}
+      </div>
 
-        {/* Pending review cards */}
-        {!loading && items.length > 0 && (
-          <div>
-            {items.map((item) => (
+      {/* ──────── MONTHLY OVERVIEW BAR ──────── */}
+      {planInfo && !postsLoading && !postsError && (
+        <div
+          className="rounded-lg p-4 mb-5 flex flex-wrap items-center gap-x-6 gap-y-2"
+          style={{ backgroundColor: '#ffffff', border: '1px solid #dadde1' }}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: '#f0f2f5' }}
+            >
+              <FileText size={14} style={{ color: '#65676b' }} />
+            </div>
+            <div>
+              <span className="text-[22px] font-bold" style={{ color: '#1c1e21' }}>
+                {summary.total}
+              </span>
+              <span className="text-[13px] ml-1" style={{ color: '#65676b' }}>
+                posts
+              </span>
+            </div>
+          </div>
+
+          <div className="w-px h-8" style={{ backgroundColor: '#dadde1' }} />
+
+          <div className="flex items-center gap-2">
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: '#b26b00' }}
+            />
+            <span className="text-[13px]" style={{ color: '#65676b' }}>
+              <strong style={{ color: '#1c1e21' }}>{summary.pending}</strong> pending review
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: '#2e7d32' }}
+            />
+            <span className="text-[13px]" style={{ color: '#65676b' }}>
+              <strong style={{ color: '#1c1e21' }}>{summary.approved}</strong> approved
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: '#1877f2' }}
+            />
+            <span className="text-[13px]" style={{ color: '#65676b' }}>
+              <strong style={{ color: '#1c1e21' }}>{summary.withImagery}</strong> with imagery
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ──────── POSTS LIST ──────── */}
+
+      {/* Loading state */}
+      {postsLoading && <LoadingSkeleton />}
+
+      {/* Error state */}
+      {!postsLoading && postsError && (
+        <ErrorState message={postsError} onRetry={() => fetchPosts(selectedPlanId)} />
+      )}
+
+      {/* Empty state */}
+      {!postsLoading && !postsError && posts.length === 0 && planInfo && <EmptyState />}
+
+      {/* No plan selected */}
+      {!postsLoading && !postsError && posts.length === 0 && !planInfo && !plansLoading && (
+        <div className="flex flex-col items-center text-center py-12">
+          <div
+            className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
+            style={{ backgroundColor: '#f0f2f5' }}
+          >
+            <Calendar size={22} strokeWidth={1.75} style={{ color: '#65676b' }} />
+          </div>
+          <p className="text-[14px]" style={{ color: '#65676b' }}>
+            Select a plan to view content
+          </p>
+        </div>
+      )}
+
+      {/* Posts cards */}
+      {!postsLoading && !postsError && posts.length > 0 && (
+        <div className="space-y-3">
+          {posts.map((post) => {
+            const isExpanded = expandedCard[post.id];
+            const isPending = post.status === 'copy_done';
+            const isApproved = post.status === 'copy_approved';
+            const isLoading = actionLoading[post.id];
+            const errMsg = actionError[post.id];
+            const isRejecting = rejecting[post.id];
+            const postDate = formatDate(post.suggested_date);
+            const todayHighlight = isToday(post.suggested_date);
+
+            return (
               <div
-                key={item.id}
-                className="rounded-lg p-4 mb-3"
-                style={{ backgroundColor: '#ffffff', border: '1px solid #dadde1' }}
+                key={post.id}
+                className="rounded-lg overflow-hidden transition-shadow hover:shadow-sm"
+                style={{
+                  backgroundColor: '#ffffff',
+                  border: isExpanded ? '1px solid #1877f2' : '1px solid #dadde1',
+                }}
               >
-                {/* Header: Topic + Pillar + Date */}
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-[15px] font-bold" style={{ color: '#1c1e21' }}>
-                      {item.topic}
-                    </h3>
-                    <PillarBadge pillar={item.pillar} />
-                  </div>
-                  <span className="text-[12px] whitespace-nowrap ml-2" style={{ color: '#65676b' }}>
-                    {formatDate(item.created_at)}
-                  </span>
-                </div>
-
-                {/* FB Content expandable */}
-                {item.fb_content && (
-                  <div className="mb-2">
-                    <button
-                      onClick={() =>
-                        setExpandedFb((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
-                      }
-                      className="flex items-center gap-1.5 text-[13px] font-semibold w-full text-left"
-                      style={{ color: '#65676b' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = '#1c1e21'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = '#65676b'; }}
-                    >
-                      {expandedFb[item.id] ? (
-                        <ChevronDown size={14} />
-                      ) : (
-                        <ChevronRight size={14} />
-                      )}
-                      Facebook Content
-                    </button>
-                    {expandedFb[item.id] && (
-                      <div
-                        className="mt-1.5 p-3 rounded-md text-[13px] whitespace-pre-wrap"
-                        style={{ backgroundColor: '#f7f8fa', color: '#1c1e21' }}
-                      >
-                        {item.fb_content}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* IG Content expandable */}
-                {item.ig_content && (
-                  <div className="mb-2">
-                    <button
-                      onClick={() =>
-                        setExpandedIg((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
-                      }
-                      className="flex items-center gap-1.5 text-[13px] font-semibold w-full text-left"
-                      style={{ color: '#65676b' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = '#1c1e21'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = '#65676b'; }}
-                    >
-                      {expandedIg[item.id] ? (
-                        <ChevronDown size={14} />
-                      ) : (
-                        <ChevronRight size={14} />
-                      )}
-                      Instagram Content
-                    </button>
-                    {expandedIg[item.id] && (
-                      <div
-                        className="mt-1.5 p-3 rounded-md text-[13px] whitespace-pre-wrap"
-                        style={{ backgroundColor: '#f7f8fa', color: '#1c1e21' }}
-                      >
-                        {item.ig_content}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Hashtags */}
-                {item.hashtags && (
-                  <div className="mb-3">
-                    <span className="text-[12px]" style={{ color: '#1877f2' }}>
-                      {item.hashtags}
-                    </span>
-                  </div>
-                )}
-
-                {/* Action error */}
-                {actionError[item.id] && (
-                  <div
-                    className="rounded-md p-3 mb-3 flex items-start gap-2"
-                    style={{ backgroundColor: '#fde2e1', border: '1px solid #f5b1ae' }}
-                  >
-                    <XCircle size={15} style={{ color: '#c62828', flexShrink: 0, marginTop: 1 }} />
-                    <p className="text-[12px]" style={{ color: '#a01818' }}>
-                      {actionError[item.id]}
-                    </p>
-                  </div>
-                )}
-
-                {/* Reject textarea */}
-                {rejecting[item.id] && (
-                  <div className="mb-3">
-                    <textarea
-                      value={rejectNotes[item.id] || ''}
-                      onChange={(e) =>
-                        setRejectNotes((prev) => ({ ...prev, [item.id]: e.target.value }))
-                      }
-                      placeholder="Describe what needs to change..."
-                      rows={3}
-                      className="w-full px-3 py-2 rounded-md text-[13px] outline-none transition-shadow resize-none"
+                {/* ── Collapsed card header (clickable) ── */}
+                <button
+                  onClick={() => toggleExpand(post.id)}
+                  className="w-full text-left p-4 flex items-start justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    {/* Date */}
+                    <div
+                      className="flex-shrink-0 w-14 text-center rounded-md py-1.5"
                       style={{
-                        border: '1px solid #dadde1',
-                        backgroundColor: '#ffffff',
-                        color: '#1c1e21',
-                      }}
-                      onFocus={(e) => {
-                        e.currentTarget.style.border = '1px solid #1877f2';
-                        e.currentTarget.style.boxShadow = '0 0 0 3px rgba(24,119,242,0.15)';
-                      }}
-                      onBlur={(e) => {
-                        e.currentTarget.style.border = '1px solid #dadde1';
-                        e.currentTarget.style.boxShadow = 'none';
-                      }}
-                    />
-                  </div>
-                )}
-
-                {/* Action buttons */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleApprove(item.id)}
-                    disabled={actionLoading[item.id]}
-                    className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: '#2e7d32', color: '#ffffff' }}
-                    onMouseEnter={(e) => {
-                      if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#1f5a23';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#2e7d32';
-                    }}
-                  >
-                    {actionLoading[item.id] ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <CheckCircle size={14} />
-                    )}
-                    Approve
-                  </button>
-
-                  {!rejecting[item.id] ? (
-                    <button
-                      onClick={() =>
-                        setRejecting((prev) => ({ ...prev, [item.id]: true }))
-                      }
-                      disabled={actionLoading[item.id]}
-                      className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{ backgroundColor: '#b26b00', color: '#ffffff' }}
-                      onMouseEnter={(e) => {
-                        if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#8a5100';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#b26b00';
+                        backgroundColor: todayHighlight ? '#e7f3ff' : '#f7f8fa',
+                        border: todayHighlight ? '1px solid #1877f2' : '1px solid #dadde1',
                       }}
                     >
-                      <MessageSquare size={14} />
-                      Request Changes
-                    </button>
-                  ) : (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleReject(item.id)}
-                        disabled={actionLoading[item.id]}
-                        className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ backgroundColor: '#c62828', color: '#ffffff' }}
-                        onMouseEnter={(e) => {
-                          if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#a01818';
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#c62828';
-                        }}
+                      <div
+                        className="text-[11px] font-semibold"
+                        style={{ color: todayHighlight ? '#1877f2' : '#65676b' }}
                       >
-                        {actionLoading[item.id] ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          <XCircle size={14} />
-                        )}
-                        Confirm Reject
-                      </button>
-                      <button
-                        onClick={() => {
-                          setRejecting((prev) => ({ ...prev, [item.id]: false }));
-                          setRejectNotes((prev) => ({ ...prev, [item.id]: '' }));
-                        }}
-                        disabled={actionLoading[item.id]}
-                        className="px-4 py-1.5 rounded-md text-[13px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ backgroundColor: '#f2f3f5', color: '#1c1e21' }}
-                        onMouseEnter={(e) => {
-                          if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#e0e1e4';
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#f2f3f5';
-                        }}
-                      >
-                        Cancel
-                      </button>
+                        {postDate}
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
-      {/* ============================== */}
-      {/* SECTION 2: Approved / Publish  */}
-      {/* ============================== */}
-      <div>
-        <h2 className="text-[18px] font-semibold mb-3" style={{ color: '#1c1e21' }}>
-          Approved · Ready to Publish
-        </h2>
-
-        {/* Loading state */}
-        {approvedLoading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={28} className="animate-spin" style={{ color: '#1877f2' }} />
-          </div>
-        )}
-
-        {/* Fetch error */}
-        {!approvedLoading && approvedError && (
-          <div
-            className="rounded-lg p-4 mb-5 flex items-start gap-3"
-            style={{ backgroundColor: '#fde2e1', border: '1px solid #f5b1ae' }}
-          >
-            <XCircle size={18} style={{ color: '#c62828', flexShrink: 0, marginTop: 2 }} />
-            <div>
-              <p className="text-[13px] font-semibold" style={{ color: '#a01818' }}>Error</p>
-              <p className="text-[13px] mt-0.5" style={{ color: '#a01818' }}>{approvedError}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Empty state */}
-        {!approvedLoading && !approvedError && approvedItems.length === 0 && (
-          <div className="flex flex-col items-center text-center py-12">
-            <div
-              className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
-              style={{ backgroundColor: '#edf7ed' }}
-            >
-              <CheckCircle size={22} strokeWidth={1.75} style={{ color: '#2e7d32' }} />
-            </div>
-            <p className="text-[14px]" style={{ color: '#65676b' }}>
-              No items ready to publish
-            </p>
-          </div>
-        )}
-
-        {/* Approved cards */}
-        {!approvedLoading && approvedItems.length > 0 && (
-          <div>
-            {approvedItems.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-lg p-4 mb-3"
-                style={{ backgroundColor: '#ffffff', border: '1px solid #dadde1' }}
-              >
-                {/* Header: Topic + Pillar + Date */}
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-[15px] font-bold" style={{ color: '#1c1e21' }}>
-                      {item.topic}
-                    </h3>
-                    <PillarBadge pillar={item.pillar} />
-                  </div>
-                  <span className="text-[12px] whitespace-nowrap ml-2" style={{ color: '#65676b' }}>
-                    {formatDate(item.created_at)}
-                  </span>
-                </div>
-
-                {/* FB Content expandable */}
-                {item.fb_content && (
-                  <div className="mb-2">
-                    <button
-                      onClick={() =>
-                        setExpandedFbApproved((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
-                      }
-                      className="flex items-center gap-1.5 text-[13px] font-semibold w-full text-left"
-                      style={{ color: '#65676b' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = '#1c1e21'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = '#65676b'; }}
-                    >
-                      {expandedFbApproved[item.id] ? (
-                        <ChevronDown size={14} />
-                      ) : (
-                        <ChevronRight size={14} />
-                      )}
-                      Facebook Content
-                    </button>
-                    {expandedFbApproved[item.id] && (
-                      <div
-                        className="mt-1.5 p-3 rounded-md text-[13px] whitespace-pre-wrap"
-                        style={{ backgroundColor: '#f7f8fa', color: '#1c1e21' }}
-                      >
-                        {item.fb_content}
+                    {/* Pillar + Topic */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <PillarBadge pillar={post.pillar} />
+                        {todayHighlight && (
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                            style={{ backgroundColor: '#e7f3ff', color: '#1877f2' }}
+                          >
+                            TODAY
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-
-                {/* IG Content expandable */}
-                {item.ig_content && (
-                  <div className="mb-2">
-                    <button
-                      onClick={() =>
-                        setExpandedIgApproved((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
-                      }
-                      className="flex items-center gap-1.5 text-[13px] font-semibold w-full text-left"
-                      style={{ color: '#65676b' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = '#1c1e21'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = '#65676b'; }}
-                    >
-                      {expandedIgApproved[item.id] ? (
-                        <ChevronDown size={14} />
-                      ) : (
-                        <ChevronRight size={14} />
-                      )}
-                      Instagram Content
-                    </button>
-                    {expandedIgApproved[item.id] && (
-                      <div
-                        className="mt-1.5 p-3 rounded-md text-[13px] whitespace-pre-wrap"
-                        style={{ backgroundColor: '#f7f8fa', color: '#1c1e21' }}
+                      <h3
+                        className="text-[14px] font-semibold truncate mt-0.5"
+                        style={{ color: '#1c1e21' }}
                       >
-                        {item.ig_content}
-                      </div>
-                    )}
+                        {post.topic}
+                      </h3>
+                    </div>
                   </div>
-                )}
 
-                {/* Hashtags */}
-                {item.hashtags && (
-                  <div className="mb-3">
-                    <span className="text-[12px]" style={{ color: '#1877f2' }}>
-                      {item.hashtags}
-                    </span>
-                  </div>
-                )}
-
-                {/* Publish success message */}
-                {publishSuccess[item.id] && (
-                  <div
-                    className="rounded-md p-3 mb-3 flex items-start gap-2"
-                    style={{ backgroundColor: '#e8f5e9', border: '1px solid #a5d6a7' }}
-                  >
-                    <CheckCircle size={15} style={{ color: '#2e7d32', flexShrink: 0, marginTop: 1 }} />
-                    <p className="text-[12px]" style={{ color: '#1f5a23' }}>
-                      {publishSuccess[item.id]}
-                    </p>
-                  </div>
-                )}
-
-                {/* Publish error message */}
-                {publishError[item.id] && (
-                  <div
-                    className="rounded-md p-3 mb-3 flex items-start gap-2"
-                    style={{ backgroundColor: '#fde2e1', border: '1px solid #f5b1ae' }}
-                  >
-                    <XCircle size={15} style={{ color: '#c62828', flexShrink: 0, marginTop: 1 }} />
-                    <p className="text-[12px]" style={{ color: '#a01818' }}>
-                      {publishError[item.id]}
-                    </p>
-                  </div>
-                )}
-
-                {/* Publish button */}
-                {!publishSuccess[item.id] && (
-                  <button
-                    onClick={() => handlePublish(item.id)}
-                    disabled={publishingId === item.id}
-                    className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: '#1877f2', color: '#ffffff' }}
-                    onMouseEnter={(e) => {
-                      if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#1465c7';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = '#1877f2';
-                    }}
-                  >
-                    {publishingId === item.id ? (
-                      <Loader2 size={14} className="animate-spin" />
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <StatusBadge status={post.status} />
+                    {isExpanded ? (
+                      <ChevronDown size={16} style={{ color: '#65676b' }} />
                     ) : (
-                      <Rocket size={14} />
+                      <ChevronRight size={16} style={{ color: '#65676b' }} />
                     )}
-                    🚀 Publish
-                  </button>
+                  </div>
+                </button>
+
+                {/* ── Expanded content ── */}
+                {isExpanded && (
+                  <div
+                    className="px-4 pb-4 pt-0 border-t"
+                    style={{ borderColor: '#e4e6eb' }}
+                  >
+                    {/* FB Content */}
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <div
+                          className="w-5 h-5 rounded flex items-center justify-center"
+                          style={{ backgroundColor: '#e7f3ff' }}
+                        >
+                          <span className="text-[10px] font-bold" style={{ color: '#1877f2' }}>
+                            f
+                          </span>
+                        </div>
+                        <span
+                          className="text-[12px] font-semibold"
+                          style={{ color: '#1c1e21' }}
+                        >
+                          Facebook Content
+                        </span>
+                      </div>
+                      <div
+                        className="p-3 rounded-md text-[13px] whitespace-pre-wrap leading-relaxed"
+                        style={{ backgroundColor: '#f7f8fa', color: '#1c1e21' }}
+                      >
+                        {post.fb_content || (
+                          <span style={{ color: '#8a8d91', fontStyle: 'italic' }}>
+                            No Facebook content
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* IG Content */}
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <div
+                          className="w-5 h-5 rounded flex items-center justify-center"
+                          style={{
+                            background:
+                              'radial-gradient(circle at 30% 30%, #feda77, #d62b75, #515bd4)',
+                          }}
+                        >
+                          <span className="text-[8px] font-bold text-white">IG</span>
+                        </div>
+                        <span
+                          className="text-[12px] font-semibold"
+                          style={{ color: '#1c1e21' }}
+                        >
+                          Instagram Content
+                        </span>
+                      </div>
+                      <div
+                        className="p-3 rounded-md text-[13px] whitespace-pre-wrap leading-relaxed"
+                        style={{ backgroundColor: '#f7f8fa', color: '#1c1e21' }}
+                      >
+                        {post.ig_content || (
+                          <span style={{ color: '#8a8d91', fontStyle: 'italic' }}>
+                            No Instagram content
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Hashtags */}
+                    {post.hashtags && (
+                      <div className="mb-3">
+                        <span
+                          className="text-[12px] font-semibold block mb-1"
+                          style={{ color: '#65676b' }}
+                        >
+                          Hashtags
+                        </span>
+                        <span className="text-[12px]" style={{ color: '#1877f2' }}>
+                          {post.hashtags}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Post Angle */}
+                    {post.post_angle && (
+                      <div className="mb-3">
+                        <span
+                          className="text-[12px] font-semibold block mb-1"
+                          style={{ color: '#65676b' }}
+                        >
+                          Post Angle
+                        </span>
+                        <p className="text-[13px]" style={{ color: '#1c1e21' }}>
+                          {post.post_angle}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Image Status */}
+                    <div className="mb-3">
+                      <span
+                        className="text-[12px] font-semibold block mb-1"
+                        style={{ color: '#65676b' }}
+                      >
+                        Image Status
+                      </span>
+                      {post.image_url ? (
+                        <div className="flex items-center gap-2">
+                          <CheckCircle size={14} style={{ color: '#2e7d32' }} />
+                          <a
+                            href={post.image_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[13px] underline break-all"
+                            style={{ color: '#1877f2' }}
+                          >
+                            {post.image_url}
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Clock size={14} style={{ color: '#b26b00' }} />
+                          <span className="text-[13px]" style={{ color: '#b26b00' }}>
+                            {post.image_status === 'pending' || !post.image_status
+                              ? 'Image not yet generated'
+                              : post.image_status}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Review Notes (if any) */}
+                    {post.review_notes && (
+                      <div className="mb-3">
+                        <span
+                          className="text-[12px] font-semibold block mb-1"
+                          style={{ color: '#65676b' }}
+                        >
+                          Previous Review Notes
+                        </span>
+                        <p
+                          className="text-[13px] p-2 rounded-md"
+                          style={{
+                            backgroundColor: '#fff4d6',
+                            color: '#7a4900',
+                          }}
+                        >
+                          {post.review_notes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* ── Action error ── */}
+                    {errMsg && (
+                      <div
+                        className="rounded-md p-3 mb-3 flex items-start gap-2"
+                        style={{ backgroundColor: '#fde2e1', border: '1px solid #f5b1ae' }}
+                      >
+                        <XCircle size={15} style={{ color: '#c62828', flexShrink: 0, marginTop: 1 }} />
+                        <p className="text-[12px]" style={{ color: '#a01818' }}>
+                          {errMsg}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* ── Action buttons (only for copy_done) ── */}
+                    {isPending && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {/* Approve button */}
+                        <button
+                          onClick={() => handleApprove(post.id)}
+                          disabled={isLoading}
+                          className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ backgroundColor: '#2e7d32', color: '#ffffff' }}
+                          onMouseEnter={(e) => {
+                            if (!e.currentTarget.disabled)
+                              e.currentTarget.style.backgroundColor = '#1f5a23';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!e.currentTarget.disabled)
+                              e.currentTarget.style.backgroundColor = '#2e7d32';
+                          }}
+                        >
+                          {isLoading ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <CheckCircle size={14} />
+                          )}
+                          Approve
+                        </button>
+
+                        {/* Request Changes / Confirm Reject */}
+                        {!isRejecting ? (
+                          <button
+                            onClick={() =>
+                              setRejecting((prev) => ({ ...prev, [post.id]: true }))
+                            }
+                            disabled={isLoading}
+                            className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ backgroundColor: '#b26b00', color: '#ffffff' }}
+                            onMouseEnter={(e) => {
+                              if (!e.currentTarget.disabled)
+                                e.currentTarget.style.backgroundColor = '#8a5100';
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!e.currentTarget.disabled)
+                                e.currentTarget.style.backgroundColor = '#b26b00';
+                            }}
+                          >
+                            <MessageSquare size={14} />
+                            Request Changes
+                          </button>
+                        ) : (
+                          <div className="flex flex-col gap-2 w-full">
+                            <textarea
+                              value={rejectNotes[post.id] || ''}
+                              onChange={(e) =>
+                                setRejectNotes((prev) => ({
+                                  ...prev,
+                                  [post.id]: e.target.value,
+                                }))
+                              }
+                              placeholder="Describe what needs to change..."
+                              rows={3}
+                              className="w-full px-3 py-2 rounded-md text-[13px] outline-none transition-shadow resize-none"
+                              style={{
+                                border: '1px solid #dadde1',
+                                backgroundColor: '#ffffff',
+                                color: '#1c1e21',
+                              }}
+                              onFocus={(e) => {
+                                e.currentTarget.style.border = '1px solid #1877f2';
+                                e.currentTarget.style.boxShadow =
+                                  '0 0 0 3px rgba(24,119,242,0.15)';
+                              }}
+                              onBlur={(e) => {
+                                e.currentTarget.style.border = '1px solid #dadde1';
+                                e.currentTarget.style.boxShadow = 'none';
+                              }}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleReject(post.id)}
+                                disabled={isLoading}
+                                className="px-4 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{ backgroundColor: '#b26b00', color: '#ffffff' }}
+                                onMouseEnter={(e) => {
+                                  if (!e.currentTarget.disabled)
+                                    e.currentTarget.style.backgroundColor = '#8a5100';
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (!e.currentTarget.disabled)
+                                    e.currentTarget.style.backgroundColor = '#b26b00';
+                                }}
+                              >
+                                {isLoading ? (
+                                  <Loader2 size={14} className="animate-spin" />
+                                ) : (
+                                  <XCircle size={14} />
+                                )}
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setRejecting((prev) => ({
+                                    ...prev,
+                                    [post.id]: false,
+                                  }));
+                                  setRejectNotes((prev) => ({
+                                    ...prev,
+                                    [post.id]: '',
+                                  }));
+                                }}
+                                disabled={isLoading}
+                                className="px-4 py-1.5 rounded-md text-[13px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{ backgroundColor: '#f2f3f5', color: '#1c1e21' }}
+                                onMouseEnter={(e) => {
+                                  if (!e.currentTarget.disabled)
+                                    e.currentTarget.style.backgroundColor = '#e0e1e4';
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (!e.currentTarget.disabled)
+                                    e.currentTarget.style.backgroundColor = '#f2f3f5';
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── Approved badge (no actions) ── */}
+                    {isApproved && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <CheckCircle size={16} style={{ color: '#2e7d32' }} />
+                        <span
+                          className="text-[13px] font-semibold"
+                          style={{ color: '#2e7d32' }}
+                        >
+                          Approved ✓
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -7,9 +7,8 @@ export async function GET() {
   }
   const { data, error } = await supabase
     .from('content_calendar')
-    .select('id, topic, pillar, fb_content, ig_content, hashtags, status, post_id, created_at')
-    .eq('status', 'approved')
-    .is('post_id', null)
+    .select('id, topic, pillar, fb_content, ig_content, hashtags, status, created_at')
+    .eq('status', 'copy_approved')
     .order('created_at', { ascending: false });
 
   if (error) {

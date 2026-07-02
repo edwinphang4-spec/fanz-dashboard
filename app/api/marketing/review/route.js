@@ -33,7 +33,7 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Row not found' }, { status: 404 });
   }
 
-  if (current.status !== 'pending_review') {
+  if (current.status !== 'copy_done') {
     return NextResponse.json({
       error: `Cannot ${action} — row is already "${current.status}"`,
       currentStatus: current.status,
@@ -41,15 +41,15 @@ export async function POST(request) {
   }
 
   const updateData = action === 'approve'
-    ? { status: 'approved' }
-    : { status: 'rejected', ...(review_notes ? { review_notes } : {}) };
+    ? { status: 'copy_approved' }
+    : { status: 'copy_done', ...(review_notes ? { review_notes } : {}) };
 
   // TOCTOU guard: conditional PATCH with status filter
   const { data: updated, error: updateError } = await supabase
     .from('content_calendar')
     .update(updateData)
     .eq('id', id)
-    .eq('status', 'pending_review')
+    .eq('status', 'copy_done')
     .select();
 
   if (updateError) {
