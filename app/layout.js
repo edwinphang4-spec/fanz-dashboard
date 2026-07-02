@@ -25,7 +25,7 @@ const navItems = [
   { href: '/conversations', label: 'Conversations', icon: MessageSquare, real: false },
   { href: '/complaints', label: 'Complaints', icon: AlertTriangle, real: true },
   { href: '/warranty', label: 'Warranty', icon: ShieldCheck, real: true },
-  { href: '/marketing', label: 'Marketing', icon: Megaphone, real: false, comingSub: ['Content Calendar — Coming Soon', 'Pending Review — Coming Soon', 'Published — Coming Soon'] },
+  { href: '/marketing', label: 'Marketing', icon: Megaphone, real: true },
   { href: '/products', label: 'Products', icon: Package, real: true },
   { href: '/settings', label: 'Settings', icon: Settings, real: false, comingSub: ['Warranty Rules — Coming Soon', 'WhatsApp Integration — Coming Soon', 'Team Members — Coming Soon'] },
 ];

@@ -2,13 +2,20 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/app/lib/supabase';
 
 /**
- * Image review endpoint — dual-entry with Telegram for imagery approval.
+ * Image review endpoint (M-5) — Dashboard side of the six review exits.
  *
  * Actions:
- *   'approve' → status: approved (all gates passed, ready to publish)
- *   'reject'  → status: image_retry (regenerate imagery)
- *   'skip'    → status: approved (skip imagery, publish copy-only)
- *   'retry'   → status: image_ready (regenerate — re-runs pipeline from image_retry)
+ *   'approve'        image_ready -> approved (gate passed, ready to schedule/publish)
+ *   'regenerate'     image_ready -> image_retry (bot worker regenerates)
+ *   'change_scene'   image_ready -> image_retry + review_notes='[scene] <text>'
+ *   'change_product' image_ready -> image_retry + review_notes='[product-next]'
+ *   'skip'           image_ready|image_retry -> approved + image_source='skipped'
+ *
+ * The regenerate/change actions only write DB state; the bot's background
+ * worker consumes status='image_retry' and runs the imagery pipeline. The
+ * review_notes markers are parsed and cleared by the worker.
+ *
+ * (The sixth exit, "upload own", is /api/marketing/image-upload.)
  */
 export async function POST(request) {
   if (!supabase) {
@@ -22,13 +29,18 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { id, action } = body;
+  const { id, action, scene } = body;
 
   if (!id) {
     return NextResponse.json({ error: 'id is required' }, { status: 400 });
   }
-  if (!['approve', 'reject', 'skip', 'retry'].includes(action)) {
-    return NextResponse.json({ error: 'action must be "approve", "reject", "skip", or "retry"' }, { status: 400 });
+
+  const ACTIONS = ['approve', 'regenerate', 'change_scene', 'change_product', 'skip'];
+  if (!ACTIONS.includes(action)) {
+    return NextResponse.json({ error: `action must be one of: ${ACTIONS.join(', ')}` }, { status: 400 });
+  }
+  if (action === 'change_scene' && !(scene || '').trim()) {
+    return NextResponse.json({ error: 'scene description is required for change_scene' }, { status: 400 });
   }
 
   // Read current status
@@ -42,52 +54,52 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Row not found' }, { status: 404 });
   }
 
-  // For retry, accept image_retry state; for others require image_ready
-  const allowedState = action === 'retry' ? 'image_retry' : 'image_ready';
-  if (current.status !== allowedState) {
+  // Allowed source states per action. 'skip' also rescues rows stuck in
+  // image_retry (e.g. generation kept failing).
+  const allowedStates = action === 'skip'
+    ? ['image_ready', 'image_retry']
+    : ['image_ready'];
+
+  if (!allowedStates.includes(current.status)) {
     return NextResponse.json({
-      error: `Cannot ${action} — row is in "${current.status}" state (expected "${allowedState}")`,
+      error: `Cannot ${action} — row is in "${current.status}" state (expected ${allowedStates.join(' or ')})`,
       currentStatus: current.status,
     }, { status: 409 });
   }
 
-  /**
-   * Map action to target status:
-   *   approve → approved (all gates passed)
-   *   reject  → image_retry (trigger regeneration)
-   *   skip    → approved (copy-only publish)
-   *   retry   → image_ready (re-run imagery pipeline)
-   */
-  let targetStatus;
+  let updateData;
   switch (action) {
     case 'approve':
-      targetStatus = 'approved';
+      updateData = { status: 'approved' };
       break;
-    case 'reject':
-      targetStatus = 'image_retry';
+    case 'regenerate':
+      updateData = { status: 'image_retry', review_notes: null };
+      break;
+    case 'change_scene':
+      updateData = { status: 'image_retry', review_notes: `[scene] ${scene.trim()}` };
+      break;
+    case 'change_product':
+      updateData = { status: 'image_retry', review_notes: '[product-next]' };
       break;
     case 'skip':
-      targetStatus = 'approved';
-      break;
-    case 'retry':
-      targetStatus = 'image_ready';
+      updateData = { status: 'approved', image_source: 'skipped' };
       break;
   }
 
   // TOCTOU guard: conditional PATCH with status filter
   const { data: updated, error: updateError } = await supabase
     .from('content_calendar')
-    .update({ status: targetStatus })
+    .update(updateData)
     .eq('id', id)
-    .eq('status', allowedState)
+    .eq('status', current.status)
     .select();
 
   if (updateError) {
+    console.error('image-review update failed:', updateError.message);
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
   if (!updated || updated.length === 0) {
-    // Row was modified by another request between read and write
     const { data: actual } = await supabase
       .from('content_calendar')
       .select('status')

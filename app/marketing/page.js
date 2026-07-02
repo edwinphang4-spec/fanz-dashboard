@@ -15,7 +15,9 @@ import {
   AlertCircle,
   RefreshCw,
   FileText,
+  ImagePlus,
 } from 'lucide-react';
+import MarketingTabs from './tabs';
 
 /* ── Pillar configuration ── */
 
@@ -194,6 +196,9 @@ export default function MarketingReviewPage() {
   const [actionError, setActionError] = useState({});
   const [rejecting, setRejecting] = useState({});
   const [rejectNotes, setRejectNotes] = useState({});
+  const [imageryLoading, setImageryLoading] = useState(false);
+  const [imageryMessage, setImageryMessage] = useState('');
+  const [imageryError, setImageryError] = useState('');
 
   /* ── Summary computed from posts ── */
   const summary = useMemo(() => {
@@ -201,7 +206,7 @@ export default function MarketingReviewPage() {
     const pending = posts.filter((p) => p.status === 'copy_done').length;
     const approved = posts.filter((p) => p.status === 'copy_approved').length;
     const withImagery = posts.filter(
-      (p) => p.image_url || p.image_status === 'ready'
+      (p) => p.image_url || p.image_status === 'stored' || p.image_status === 'composited'
     ).length;
     return { total, pending, approved, withImagery };
   }, [posts]);
@@ -336,6 +341,31 @@ export default function MarketingReviewPage() {
     setActionLoading((prev) => ({ ...prev, [id]: false }));
   }, [rejectNotes]);
 
+  /* ── Start batch image generation (M-4 -> M-5 handoff) ── */
+  const handleStartImagery = useCallback(async () => {
+    if (!selectedPlanId) return;
+    setImageryLoading(true);
+    setImageryError('');
+    setImageryMessage('');
+    try {
+      const res = await fetch('/api/marketing/start-imagery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId: selectedPlanId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setImageryError(data.error || 'Failed to start image generation.');
+      } else {
+        setImageryMessage(data.message || 'Image generation queued.');
+        await fetchPosts(selectedPlanId); // refresh plan status (-> in_production)
+      }
+    } catch {
+      setImageryError('Failed to connect to server.');
+    }
+    setImageryLoading(false);
+  }, [selectedPlanId, fetchPosts]);
+
   /* ── Get selected plan display text ── */
   const getPlanLabel = (plan) => {
     const counts = plan.counts || {};
@@ -358,6 +388,8 @@ export default function MarketingReviewPage() {
           Review and approve monthly marketing content
         </p>
       </div>
+
+      <MarketingTabs />
 
       {/* ──────── PLAN SELECTOR ──────── */}
       <div
@@ -476,6 +508,54 @@ export default function MarketingReviewPage() {
             <span className="text-[13px]" style={{ color: '#65676b' }}>
               <strong style={{ color: '#1c1e21' }}>{summary.withImagery}</strong> with imagery
             </span>
+          </div>
+
+          {/* ── M-4 -> M-5 handoff: start batch image generation ── */}
+          <div className="ml-auto flex items-center gap-3">
+            {imageryError && (
+              <span className="text-[12.5px]" style={{ color: '#c62828' }}>{imageryError}</span>
+            )}
+            {imageryMessage && (
+              <span className="text-[12.5px]" style={{ color: '#2e7d32' }}>{imageryMessage}</span>
+            )}
+            {planInfo.status === 'plan_approved' && summary.pending === 0 && summary.approved > 0 && (
+              <button
+                onClick={handleStartImagery}
+                disabled={imageryLoading}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-semibold transition-opacity disabled:opacity-60"
+                style={{ backgroundColor: '#1877f2', color: '#ffffff' }}
+              >
+                {imageryLoading
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <ImagePlus size={14} />}
+                Start Image Generation ({summary.approved})
+              </button>
+            )}
+            {planInfo.status === 'plan_approved' && summary.pending > 0 && (
+              <span className="text-[12.5px]" style={{ color: '#8a8d91' }}>
+                Review all copy to unlock image generation
+              </span>
+            )}
+            {planInfo.status === 'in_production' && (
+              <a
+                href="/marketing/images"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-semibold"
+                style={{ backgroundColor: '#e7f3ff', color: '#1877f2', border: '1px solid #bcd9f7' }}
+              >
+                <ImagePlus size={14} />
+                Image generation in progress — open Image Review
+              </a>
+            )}
+            {planInfo.status === 'scheduled' && (
+              <a
+                href="/marketing/schedule"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-semibold"
+                style={{ backgroundColor: '#e3f1d8', color: '#1b5e20', border: '1px solid #c5e1b0' }}
+              >
+                <Calendar size={14} />
+                Scheduled — view calendar
+              </a>
+            )}
           </div>
         </div>
       )}
