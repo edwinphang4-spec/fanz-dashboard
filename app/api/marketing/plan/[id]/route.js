@@ -6,7 +6,8 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 });
   }
 
-  const planId = params.id;
+  const { id } = await params;
+  const planId = id;
 
   const { data: plan, error: planError } = await supabase
     .from('content_plans')
