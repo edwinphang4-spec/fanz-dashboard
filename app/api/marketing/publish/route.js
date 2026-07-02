@@ -37,11 +37,16 @@ export async function POST(request) {
     }, { status: 409 });
   }
 
-  // Idempotency check
-  if (current.post_id) {
+  // Idempotency check — the table has fb_post_id + ig_post_id
+  // (there is NO single post_id column; verified against the live schema)
+  if (current.fb_post_id || current.ig_post_id) {
+    const refs = [];
+    if (current.fb_post_id) refs.push(`FB: ${current.fb_post_id}`);
+    if (current.ig_post_id) refs.push(`IG: ${current.ig_post_id}`);
     return NextResponse.json({
-      error: `Already published: ${current.post_id}`,
-      post_id: current.post_id,
+      error: `Already published: ${refs.join(', ')}`,
+      fb_post_id: current.fb_post_id,
+      ig_post_id: current.ig_post_id,
     }, { status: 409 });
   }
 
@@ -49,7 +54,12 @@ export async function POST(request) {
 
   let publishResult;
   if (DRY_RUN) {
-    publishResult = { post_id: `DRYRUN-${Date.now()}`, dry_run: true };
+    const ts = Date.now();
+    publishResult = {
+      fb_post_id: `DRYRUN-FB-${ts}`,
+      ig_post_id: `DRYRUN-IG-${ts}`,
+      dry_run: true,
+    };
   } else {
     return NextResponse.json({
       error: 'Real Meta API publish not configured. Set DRYRUN=true or configure Meta credentials.',
@@ -59,12 +69,17 @@ export async function POST(request) {
   // Update DB with TOCTOU guard
   const { data: updated, error: updateError } = await supabase
     .from('content_calendar')
-    .update({ post_id: publishResult.post_id, status: 'published' })
+    .update({
+      fb_post_id: publishResult.fb_post_id,
+      ig_post_id: publishResult.ig_post_id,
+      status: 'published',
+    })
     .eq('id', id)
     .eq('status', 'approved')
     .select();
 
   if (updateError) {
+    console.error('publish update failed:', updateError.message);
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
@@ -76,7 +91,8 @@ export async function POST(request) {
 
   return NextResponse.json({
     success: true,
-    post_id: publishResult.post_id,
+    fb_post_id: publishResult.fb_post_id,
+    ig_post_id: publishResult.ig_post_id,
     dry_run: publishResult.dry_run,
     row: updated[0],
   });
